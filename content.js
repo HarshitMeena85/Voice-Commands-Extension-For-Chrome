@@ -1,5 +1,5 @@
 const startButton = document.createElement('button');
-startButton.textContent = "🎤 Start Voice Commands";
+startButton.textContent = "🎤";
 startButton.style.position = 'fixed';
 startButton.style.zIndex = 9999;
 startButton.style.padding = '10px';
@@ -32,7 +32,7 @@ startButton.addEventListener('mousedown', (e) => {
   offsetX = e.clientX - startButton.getBoundingClientRect().left;
   offsetY = e.clientY - startButton.getBoundingClientRect().top;
   startButton.style.transition = 'none';
-  e.preventDefault(); // prevent text selection
+  e.preventDefault();
 });
 
 document.addEventListener('mousemove', (e) => {
@@ -43,7 +43,6 @@ document.addEventListener('mousemove', (e) => {
     startButton.style.top = `${y}px`;
     startButton.style.right = 'auto';
 
-    // Save position in localStorage
     localStorage.setItem('voice_button_x', x);
     localStorage.setItem('voice_button_y', y);
   }
@@ -59,14 +58,24 @@ const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecogni
 const recognition = new SpeechRecognition();
 
 recognition.continuous = true;
-recognition.interimResults = true; // ✅ for fast reaction
+recognition.interimResults = true;
 recognition.lang = 'en-US';
 
 let lastCommand = "";
+let isListening = false;
 
 startButton.onclick = () => {
-  recognition.start();
-  console.log("Voice recognition started");
+  if (isListening) {
+    recognition.stop();
+    console.log("🔇 Voice recognition stopped by user.");
+    isListening = false;
+    startButton.textContent = "🎤";
+  } else {
+    recognition.start();
+    console.log("🎙️ Voice recognition started.");
+    isListening = true;
+    startButton.textContent = "🎧 Listening...";
+  }
 };
 
 recognition.onresult = (event) => {
@@ -82,16 +91,14 @@ recognition.onresult = (event) => {
     chrome.runtime.sendMessage({ command: "close_youtube" });
   }
 };
-recognition.onstart = () => {
-  console.log("🎤 Voice recognition has started listening.");
-  startButton.textContent = "🎤 Listening...";
-};
+
 recognition.onerror = (e) => {
   console.error("Speech recognition error:", e);
 };
 
 recognition.onend = () => {
-  console.log("🛑 Voice recognition restarted.");
-  startButton.textContent = "🎤 Start Voice Commands";
-  recognition.start(); // keep listening
+  console.log("🔁 Recognition ended naturally.");
+  if (isListening) {
+    recognition.start(); // only auto-restart if not manually stopped
+  }
 };
