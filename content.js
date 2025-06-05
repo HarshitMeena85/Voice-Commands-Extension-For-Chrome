@@ -90,6 +90,12 @@ recognition.onresult = (event) => {
   } else if (transcript.includes("close youtube")) {
     chrome.runtime.sendMessage({ command: "close_youtube" });
   }
+  else if(transcript.includes("stop listening")){
+    recognition.stop();
+    console.log("🔇 Voice recognition stopped by user.");
+    isListening = false;
+    startButton.textContent = "🎤";
+  }
 };
 
 recognition.onerror = (e) => {
