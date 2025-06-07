@@ -1,0 +1,43 @@
+{
+  "manifest_version": 3,
+  "name": "X Feed Viewer",
+  "version": "1.0.0",
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  },
+  "description": "View shared X (Twitter) home feeds with OAuth authentication",
+  "permissions": [
+    "storage",
+    "tabs",
+    "activeTab",
+    "identity"
+  ],
+  "host_permissions": [
+    "https://api.twitter.com/*",
+    "https://x.com/*",
+    "https://twitter.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://x.com/oauth/callback*",
+        "https://twitter.com/oauth/callback*"
+      ],
+      "js": ["crypto-js.min.js", "content.js"]
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "X Feed Viewer"
+
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["crypto-js.min.js"],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}
