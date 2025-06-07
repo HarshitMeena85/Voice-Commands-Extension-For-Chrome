@@ -1,7 +1,40 @@
+<!-- popup.html -->
 <!DOCTYPE html>
 <html>
-<head><title>Voice Shortcuts</title></head>
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="popup.css">
+</head>
 <body>
-  <h3>🎤 Listening for commands...</h3>
+  <div class="container">
+    <h1>Voice Tab Controller</h1>
+    
+    <div class="status" id="status">
+      <span id="statusText">Ready</span>
+    </div>
+    
+    <div class="controls">
+      <button id="startBtn" class="btn btn-start">Start Listening</button>
+      <button id="stopBtn" class="btn btn-stop" disabled>Stop Listening</button>
+    </div>
+    
+    <div class="commands">
+      <h3>Available Commands:</h3>
+      <ul>
+        <li>"New tab" - Opens a new tab</li>
+        <li>"Close tab" - Closes current tab</li>
+        <li>"Next tab" - Switch to next tab</li>
+        <li>"Previous tab" - Switch to previous tab</li>
+        <li>"New window" - Opens new window</li>
+        <li>"Close window" - Closes current window</li>
+        <li>"Reload" or "Refresh" - Reloads current tab</li>
+        <li>"Duplicate tab" - Duplicates current tab</li>
+        <li>"Pin tab" - Pins/unpins current tab</li>
+        <li>"Mute tab" - Mutes/unmutes current tab</li>
+      </ul>
+    </div>
+  </div>
+  
+  <script src="popup.js"></script>
 </body>
 </html>
