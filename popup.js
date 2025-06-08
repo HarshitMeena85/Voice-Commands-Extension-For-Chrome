@@ -4,73 +4,126 @@ document.addEventListener('DOMContentLoaded', () => {
   const status = document.getElementById('status');
   const statusText = document.getElementById('statusText');
 
-  // Check if content script is ready when popup opens
-  chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-    const currentTab = tabs[0];
-    
-    // Check if this is a restricted page
-    if (currentTab.url.startsWith('chrome://') || 
-        currentTab.url.startsWith('chrome-extension://') || 
-        currentTab.url.startsWith('edge://') || 
-        currentTab.url.startsWith('about:')) {
-      statusText.textContent = 'Not available on this page';
+  let currentTab = null;
+
+  // Initialize popup
+  init();
+
+  async function init() {
+    try {
+      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+      currentTab = tabs[0];
+      
+      // Check if this is a restricted page
+      if (isRestrictedPage(currentTab.url)) {
+        statusText.textContent = 'Voice control not available on this page';
+        startBtn.disabled = true;
+        stopBtn.disabled = true;
+        return;
+      }
+      
+      // Check content script status
+      await checkContentScriptStatus();
+    } catch (error) {
+      console.error('Initialization error:', error);
+      statusText.textContent = 'Error initializing extension';
       startBtn.disabled = true;
       stopBtn.disabled = true;
-      return;
     }
-    
-    // Ping content script to check if it's ready
-    chrome.tabs.sendMessage(currentTab.id, { action: 'ping' }, (response) => {
-      if (chrome.runtime.lastError) {
-        statusText.textContent = 'Content script loading...';
-        // Retry after a short delay
-        setTimeout(() => {
-          chrome.tabs.sendMessage(currentTab.id, { action: 'ping' }, (response) => {
-            if (chrome.runtime.lastError) {
-              statusText.textContent = 'Please refresh the page';
-              startBtn.disabled = true;
-            } else {
-              statusText.textContent = 'Ready';
-              startBtn.disabled = false;
-            }
-          });
-        }, 1000);
-      } else {
-        statusText.textContent = 'Ready';
-        startBtn.disabled = false;
-      }
-    });
-  });
+  }
 
-  startBtn.addEventListener('click', () => {
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      chrome.tabs.sendMessage(tabs[0].id, { action: 'startListening' }, (response) => {
-        if (chrome.runtime.lastError) {
-          console.error('Error sending message:', chrome.runtime.lastError);
-          statusText.textContent = 'Error: Please refresh the page';
-          return;
-        }
+  function isRestrictedPage(url) {
+    const restrictedPrefixes = [
+      'chrome://',
+      'chrome-extension://',
+      'edge://',
+      'about:',
+      'moz-extension://',
+      'safari-extension://'
+    ];
+    
+    return restrictedPrefixes.some(prefix => url.startsWith(prefix));
+  }
+
+  async function checkContentScriptStatus() {
+    let retryCount = 0;
+    const maxRetries = 3;
+    
+    const checkScript = async () => {
+      try {
+        const response = await sendMessageToTab({ action: 'ping' });
         
         if (response && response.success) {
-          updateUI(true);
+          if (response.speechSupported) {
+            statusText.textContent = 'Ready';
+            startBtn.disabled = false;
+          } else {
+            statusText.textContent = 'Speech recognition not supported';
+            startBtn.disabled = true;
+          }
         } else {
-          statusText.textContent = 'Failed to start listening';
+          throw new Error('Invalid response');
+        }
+      } catch (error) {
+        retryCount++;
+        
+        if (retryCount < maxRetries) {
+          statusText.textContent = `Loading... (${retryCount}/${maxRetries})`;
+          setTimeout(checkScript, 1000);
+        } else {
+          statusText.textContent = 'Please refresh the page';
+          startBtn.disabled = true;
+        }
+      }
+    };
+    
+    await checkScript();
+  }
+
+  async function sendMessageToTab(message) {
+    return new Promise((resolve, reject) => {
+      if (!currentTab) {
+        reject(new Error('No current tab'));
+        return;
+      }
+      
+      chrome.tabs.sendMessage(currentTab.id, message, (response) => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+        } else {
+          resolve(response);
         }
       });
     });
+  }
+
+  startBtn.addEventListener('click', async () => {
+    try {
+      const response = await sendMessageToTab({ action: 'startListening' });
+      
+      if (response && response.success) {
+        updateUI(true);
+      } else {
+        statusText.textContent = 'Failed to start listening';
+      }
+    } catch (error) {
+      console.error('Error starting listening:', error);
+      statusText.textContent = 'Error: ' + error.message;
+      
+      // Try to re-initialize
+      setTimeout(checkContentScriptStatus, 1000);
+    }
   });
 
-  stopBtn.addEventListener('click', () => {
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      chrome.tabs.sendMessage(tabs[0].id, { action: 'stopListening' }, (response) => {
-        if (chrome.runtime.lastError) {
-          console.error('Error sending message:', chrome.runtime.lastError);
-          return;
-        }
-        
-        updateUI(false);
-      });
-    });
+  stopBtn.addEventListener('click', async () => {
+    try {
+      await sendMessageToTab({ action: 'stopListening' });
+      updateUI(false);
+    } catch (error) {
+      console.error('Error stopping listening:', error);
+      // Still update UI even if there was an error
+      updateUI(false);
+    }
   });
 
   function updateUI(listening) {
@@ -86,4 +139,13 @@ document.addEventListener('DOMContentLoaded', () => {
       status.classList.remove('listening');
     }
   }
+
+  // Handle popup closing - stop listening
+  window.addEventListener('beforeunload', async () => {
+    try {
+      await sendMessageToTab({ action: 'stopListening' });
+    } catch (error) {
+      // Ignore errors when popup is closing
+    }
+  });
 });
