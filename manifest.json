@@ -5,7 +5,7 @@
   "description": "Control Chrome tabs and windows with voice commands",
   "permissions": [
     "tabs",
-    "activeTab",
+    "activeTab", 
     "storage"
   ],
   "host_permissions": [
@@ -24,11 +24,5 @@
   "action": {
     "default_popup": "popup.html",
     "default_title": "Voice Tab Controller"
-  },
-  "web_accessible_resources": [
-    {
-      "resources": ["content.js"],
-      "matches": ["<all_urls>"]
-    }
-  ]
+  }
 }

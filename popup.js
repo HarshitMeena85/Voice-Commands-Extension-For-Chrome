@@ -6,7 +6,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
   let currentTab = null;
 
-  // Initialize popup
   init();
 
   async function init() {
@@ -14,7 +13,6 @@ document.addEventListener('DOMContentLoaded', () => {
       const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
       currentTab = tabs[0];
       
-      // Check if this is a restricted page
       if (isRestrictedPage(currentTab.url)) {
         statusText.textContent = 'Voice control not available on this page';
         startBtn.disabled = true;
@@ -22,7 +20,6 @@ document.addEventListener('DOMContentLoaded', () => {
         return;
       }
       
-      // Check content script status
       await checkContentScriptStatus();
     } catch (error) {
       console.error('Initialization error:', error);
@@ -55,7 +52,7 @@ document.addEventListener('DOMContentLoaded', () => {
         
         if (response && response.success) {
           if (response.speechSupported) {
-            statusText.textContent = 'Ready';
+            statusText.textContent = 'Ready for global listening';
             startBtn.disabled = false;
           } else {
             statusText.textContent = 'Speech recognition not supported';
@@ -99,9 +96,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
   startBtn.addEventListener('click', async () => {
     try {
-      const response = await sendMessageToTab({ action: 'startListening' });
+      const response = await chrome.runtime.sendMessage({ 
+        action: 'startGlobalListening' 
+      });
       
       if (response && response.success) {
+        await sendMessageToTab({ action: 'startListening' });
         updateUI(true);
       } else {
         statusText.textContent = 'Failed to start listening';
@@ -109,19 +109,15 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch (error) {
       console.error('Error starting listening:', error);
       statusText.textContent = 'Error: ' + error.message;
-      
-      // Try to re-initialize
-      setTimeout(checkContentScriptStatus, 1000);
     }
   });
 
   stopBtn.addEventListener('click', async () => {
     try {
-      await sendMessageToTab({ action: 'stopListening' });
+      await chrome.runtime.sendMessage({ action: 'stopGlobalListening' });
       updateUI(false);
     } catch (error) {
       console.error('Error stopping listening:', error);
-      // Still update UI even if there was an error
       updateUI(false);
     }
   });
@@ -130,20 +126,19 @@ document.addEventListener('DOMContentLoaded', () => {
     if (listening) {
       startBtn.disabled = true;
       stopBtn.disabled = false;
-      statusText.textContent = 'Listening for commands...';
+      statusText.textContent = 'Listening across all tabs...';
       status.classList.add('listening');
     } else {
       startBtn.disabled = false;
       stopBtn.disabled = true;
-      statusText.textContent = 'Ready';
+      statusText.textContent = 'Ready for global listening';
       status.classList.remove('listening');
     }
   }
 
-  // Handle popup closing - stop listening
   window.addEventListener('beforeunload', async () => {
     try {
-      await sendMessageToTab({ action: 'stopListening' });
+      await chrome.runtime.sendMessage({ action: 'stopGlobalListening' });
     } catch (error) {
       // Ignore errors when popup is closing
     }

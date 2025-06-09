@@ -2,8 +2,8 @@ let recognition = null;
 let isListening = false;
 let isInitialized = false;
 let isProcessingCommand = false;
+let shouldKeepListening = false;
 
-// Pre-compile command patterns for faster matching
 const COMMAND_PATTERNS = [
   { pattern: /new tab/i, command: 'new tab' },
   { pattern: /close tab/i, command: 'close tab' },
@@ -17,7 +17,6 @@ const COMMAND_PATTERNS = [
   { pattern: /mute tab/i, command: 'mute tab' }
 ];
 
-// Initialize when DOM is ready
 function initializeWhenReady() {
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', initializeSpeechRecognition);
@@ -39,11 +38,10 @@ function initializeSpeechRecognition() {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     recognition = new SpeechRecognition();
     
-    // Optimize for speed
     recognition.continuous = true;
-    recognition.interimResults = true; // Process interim results for faster response
+    recognition.interimResults = true;
     recognition.lang = 'en-US';
-    recognition.maxAlternatives = 1; // Reduce processing overhead
+    recognition.maxAlternatives = 1;
     
     recognition.onstart = () => {
       console.log('Voice recognition started');
@@ -52,12 +50,10 @@ function initializeSpeechRecognition() {
     };
 
     recognition.onresult = (event) => {
-      // Process interim results for instant response
       for (let i = event.resultIndex; i < event.results.length; i++) {
         const result = event.results[i];
         const transcript = result[0].transcript.toLowerCase().trim();
         
-        // Only process if confidence is reasonable or if it's a final result
         if (result.isFinal || result[0].confidence > 0.7) {
           console.log('Voice command (interim):', transcript, 'Final:', result.isFinal, 'Confidence:', result[0].confidence);
           
@@ -65,7 +61,6 @@ function initializeSpeechRecognition() {
           if (matchedCommand && !isProcessingCommand) {
             isProcessingCommand = true;
             
-            // Execute immediately
             chrome.runtime.sendMessage({
               action: 'executeCommand',
               command: matchedCommand
@@ -73,24 +68,9 @@ function initializeSpeechRecognition() {
             
             showCommandExecuted(matchedCommand);
             
-            // Reset processing flag after a short delay
             setTimeout(() => {
               isProcessingCommand = false;
             }, 500);
-            
-            // If this was from an interim result, restart recognition immediately
-            if (!result.isFinal) {
-              setTimeout(() => {
-                if (isListening) {
-                  try {
-                    recognition.stop();
-                    recognition.start();
-                  } catch (e) {
-                    console.log('Quick restart failed:', e);
-                  }
-                }
-              }, 100);
-            }
           }
         }
       }
@@ -99,18 +79,14 @@ function initializeSpeechRecognition() {
     recognition.onerror = (event) => {
       console.error('Speech recognition error:', event.error);
       
-      // Don't show errors for common non-critical issues
-      if (event.error === 'no-speech' || event.error === 'audio-capture') {
-        console.log('Non-critical error, continuing...');
+      if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+        shouldKeepListening = false;
+        showError('Microphone access denied. Please allow microphone permissions.');
         return;
       }
       
-      if (event.error === 'not-allowed') {
-        showError('Microphone access denied. Please allow microphone permissions.');
-      } else if (event.error === 'network') {
+      if (event.error === 'network') {
         showError('Network error. Speech recognition requires internet connection.');
-      } else {
-        showError(`Speech error: ${event.error}`);
       }
       
       isListening = false;
@@ -120,7 +96,22 @@ function initializeSpeechRecognition() {
     recognition.onend = () => {
       console.log('Voice recognition ended');
       isListening = false;
-      hideListeningIndicator();
+      
+      if (shouldKeepListening) {
+        setTimeout(() => {
+          if (shouldKeepListening && recognition) {
+            try {
+              recognition.start();
+            } catch (error) {
+              console.error('Failed to restart recognition:', error);
+              shouldKeepListening = false;
+              hideListeningIndicator();
+            }
+          }
+        }, 100);
+      } else {
+        hideListeningIndicator();
+      }
     };
     
     isInitialized = true;
@@ -131,7 +122,6 @@ function initializeSpeechRecognition() {
   }
 }
 
-// Optimized command matching using pre-compiled patterns
 function findMatchingCommand(transcript) {
   for (const { pattern, command } of COMMAND_PATTERNS) {
     if (pattern.test(transcript)) {
@@ -139,11 +129,6 @@ function findMatchingCommand(transcript) {
     }
   }
   return null;
-}
-
-// Legacy function for compatibility
-function isValidCommand(transcript) {
-  return findMatchingCommand(transcript) !== null;
 }
 
 function startListening() {
@@ -161,6 +146,8 @@ function startListening() {
     return;
   }
   
+  shouldKeepListening = true;
+  
   if (isListening) {
     console.log('Already listening');
     return;
@@ -171,16 +158,18 @@ function startListening() {
   } catch (error) {
     console.error('Error starting recognition:', error);
     if (error.name === 'InvalidStateError') {
-      // Recognition is already started, just update the UI
       isListening = true;
       showListeningIndicator();
     } else {
       showError('Failed to start listening: ' + error.message);
+      shouldKeepListening = false;
     }
   }
 }
 
 function stopListening() {
+  shouldKeepListening = false;
+  
   if (recognition && isListening) {
     try {
       recognition.stop();
@@ -220,7 +209,7 @@ function showError(message) {
     
     setTimeout(() => {
       hideListeningIndicator();
-    }, 3000); // Shorter timeout
+    }, 3000);
   };
   
   if (document.body) {
@@ -258,7 +247,6 @@ function showListeningIndicator() {
       animation: pulse 1.5s infinite;
     `;
     
-    // Add pulsing animation
     if (!document.getElementById('voice-animation-style')) {
       const style = document.createElement('style');
       style.id = 'voice-animation-style';
@@ -310,7 +298,6 @@ function showCommandExecuted(command) {
       animation: flash 0.3s ease-out;
     `;
     
-    // Add flash animation for instant feedback
     if (!document.getElementById('voice-flash-style')) {
       const style = document.createElement('style');
       style.id = 'voice-flash-style';
@@ -329,9 +316,9 @@ function showCommandExecuted(command) {
     setTimeout(() => {
       if (indicator.parentNode) {
         indicator.style.animation = 'none';
-        showListeningIndicator(); // Go back to listening
+        showListeningIndicator();
       }
-    }, 1000); // Shorter display time
+    }, 1000);
   };
   
   if (document.body) {
@@ -361,7 +348,6 @@ function removeExistingIndicator() {
   });
 }
 
-// Listen for messages from popup
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   console.log('Content script received message:', request);
   
@@ -386,7 +372,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   return true;
 });
 
-// Initialize when script loads
 initializeWhenReady();
 
 console.log('Voice Tab Controller content script loaded and ready');
