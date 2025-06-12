@@ -42,6 +42,18 @@ document.addEventListener('DOMContentLoaded', () => {
     return restrictedPrefixes.some(prefix => url.startsWith(prefix));
   }
 
+  // Request microphone permission before starting
+  async function requestMicrophonePermission() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream.getTracks().forEach(track => track.stop()); // Stop the stream, we just needed permission
+      return true;
+    } catch (error) {
+      console.error('Microphone permission denied:', error);
+      return false;
+    }
+  }
+
   async function checkContentScriptStatus() {
     let retryCount = 0;
     const maxRetries = 3;
@@ -96,6 +108,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
   startBtn.addEventListener('click', async () => {
     try {
+      statusText.textContent = 'Requesting microphone permission...';
+      
+      // First request microphone permission
+      const hasPermission = await requestMicrophonePermission();
+      if (!hasPermission) {
+        statusText.textContent = 'Microphone permission required. Please allow access and try again.';
+        return;
+      }
+      
+      statusText.textContent = 'Starting global listening...';
+      
       const response = await chrome.runtime.sendMessage({ 
         action: 'startGlobalListening' 
       });
@@ -114,6 +137,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   stopBtn.addEventListener('click', async () => {
     try {
+      statusText.textContent = 'Stopping listening...';
       await chrome.runtime.sendMessage({ action: 'stopGlobalListening' });
       updateUI(false);
     } catch (error) {
@@ -126,7 +150,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (listening) {
       startBtn.disabled = true;
       stopBtn.disabled = false;
-      statusText.textContent = 'Listening across all tabs...';
+      statusText.textContent = '🎤 Listening across all tabs...';
       status.classList.add('listening');
     } else {
       startBtn.disabled = false;
@@ -143,4 +167,51 @@ document.addEventListener('DOMContentLoaded', () => {
       // Ignore errors when popup is closing
     }
   });
+  // Add this function to request microphone permission
+async function requestMicrophonePermission() {
+  try {
+    // Request permission from extension context
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    stream.getTracks().forEach(track => track.stop()); // Stop immediately, we just needed permission
+    console.log('Microphone permission granted');
+    return true;
+  } catch (error) {
+    console.error('Microphone permission denied:', error);
+    if (error.name === 'NotAllowedError') {
+      // Open Chrome settings for manual permission grant
+      chrome.tabs.create({
+        url: `chrome://settings/content/siteDetails?site=chrome-extension%3A%2F%2F${chrome.runtime.id}%2F`
+      });
+    }
+    return false;
+  }
+}
+
+// Modify your start button handler
+startBtn.addEventListener('click', async () => {
+  try {
+    statusText.textContent = 'Requesting microphone permission...';
+    
+    // First request microphone permission
+    const hasPermission = await requestMicrophonePermission();
+    if (!hasPermission) {
+      statusText.textContent = 'Please grant microphone permission in the opened settings page, then try again.';
+      return;
+    }
+    
+    // Continue with starting global listening
+    const response = await chrome.runtime.sendMessage({ 
+      action: 'startGlobalListening' 
+    });
+    
+    if (response && response.success) {
+      await sendMessageToTab({ action: 'startListening' });
+      updateUI(true);
+    }
+  } catch (error) {
+    console.error('Error starting listening:', error);
+    statusText.textContent = 'Error: ' + error.message;
+  }
+});
+
 });
