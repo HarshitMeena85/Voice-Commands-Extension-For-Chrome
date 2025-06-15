@@ -62,7 +62,7 @@
 
 You can set a custom command like:
 
-- **Phrase:** `open youtube`
+- **Phrase:** `Open youtube`
 - **URL:** `https://youtube.com`
 
 When you say *"open youtube"*, it will open the link in a new tab.
