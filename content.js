@@ -90,11 +90,11 @@ async function executeCommand(command) {
 
     if (response && response.success) {
       if (isGlobalMode) {
-        showFeedback(`✓ ${command}`);
+        showFeedback(`Executed: ${command}`);
       }
     } else {
       if (isGlobalMode) {
-        showError(`❌ Unrecognized: ${command}`);
+        showError(`Unrecognized: ${command}`);
       }
     }
   } catch (error) {
