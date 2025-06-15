@@ -2,316 +2,178 @@ let isGlobalListening = false;
 let primaryListeningTabId = null;
 let allListeningTabs = new Set();
 
-// Initialize extension
 chrome.runtime.onInstalled.addListener(() => {
   console.log('Voice Tab Controller installed');
 });
 
-// Handle messages from popup and content scripts
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  console.log('Background received message:', request);
-
   if (request.action === 'startGlobalListening') {
     startGlobalListening(sender.tab?.id)
       .then(() => sendResponse({ success: true }))
-      .catch(error => {
-        console.error('Failed to start global listening:', error);
-        sendResponse({ success: false, error: error.message });
-      });
+      .catch(error => sendResponse({ success: false, error: error.message }));
     return true;
   }
 
   if (request.action === 'stopGlobalListening') {
     stopGlobalListening()
       .then(() => sendResponse({ success: true }))
-      .catch(error => {
-        console.error('Failed to stop global listening:', error);
-        sendResponse({ success: false, error: error.message });
-      });
+      .catch(error => sendResponse({ success: false, error: error.message }));
+    return true;
+  }
+
+  if (request.action === 'getPrimaryTabId') {
+    sendResponse({ primaryTabId: primaryListeningTabId });
+    return true;
+  }
+
+  if (request.action === 'whoAmI') {
+    sendResponse({ tabId: sender.tab?.id });
     return true;
   }
 
   if (request.action === 'executeCommand') {
     executeVoiceCommand(request.command, sender.tab?.id)
       .then(() => sendResponse({ success: true }))
-      .catch(error => {
-        console.error('Failed to execute command:', error);
-        sendResponse({ success: false, error: error.message });
-      });
+      .catch(error => sendResponse({ success: false, error: error.message }));
     return true;
   }
 
   return false;
 });
 
-// Improved function to wait for content script
 async function waitForContentScript(tabId, maxRetries = 5) {
   for (let i = 0; i < maxRetries; i++) {
     try {
       const response = await chrome.tabs.sendMessage(tabId, { action: 'ping' });
-      if (response && response.success) {
-        return true;
-      }
-    } catch (error) {
-      console.log(`Content script not ready on tab ${tabId}, attempt ${i + 1}`);
-    }
+      if (response && response.success) return true;
+    } catch {}
     await new Promise(resolve => setTimeout(resolve, 1000));
   }
   return false;
 }
 
-// Start listening on a specific tab
 async function startListeningOnTab(tabId) {
   const isReady = await waitForContentScript(tabId);
   if (isReady) {
     try {
-      const response = await chrome.tabs.sendMessage(tabId, { action: 'startListening' });
-      if (response && response.success) {
-        console.log('Successfully started listening on tab:', tabId);
-        return true;
-      }
-    } catch (error) {
-      console.error('Failed to start listening on tab:', tabId, error);
-    }
+      const response = await chrome.tabs.sendMessage(tabId, {
+        action: 'startListening',
+        tabId: tabId   // 👉 pass tabId directly
+      });
+      return response && response.success;
+    } catch {}
   }
   return false;
 }
 
+
 async function startGlobalListening(initiatingTabId) {
-  try {
-    isGlobalListening = true;
-    primaryListeningTabId = initiatingTabId;
-    
-    // Start listening on all valid tabs
-    const tabs = await chrome.tabs.query({});
-    const startPromises = [];
-    
-    for (const tab of tabs) {
-      if (!isRestrictedPage(tab.url)) {
-        startPromises.push(
-          startListeningOnTab(tab.id).then(success => {
-            if (success) {
-              allListeningTabs.add(tab.id);
-            }
-          })
-        );
-      }
+  isGlobalListening = true;
+  primaryListeningTabId = initiatingTabId;
+  allListeningTabs.clear();
+
+  const tabs = await chrome.tabs.query({});
+  for (const tab of tabs) {
+    if (!isRestrictedPage(tab.url)) {
+      allListeningTabs.add(tab.id);
+      if (tab.id === initiatingTabId) await startListeningOnTab(tab.id);
     }
-    
-    await Promise.allSettled(startPromises);
-    console.log('Global listening started across', allListeningTabs.size, 'tabs');
-    return Promise.resolve();
-  } catch (error) {
-    console.error('Error starting global listening:', error);
-    return Promise.reject(error);
   }
+  console.log('Global listening started on tab:', initiatingTabId);
 }
 
 async function stopGlobalListening() {
-  try {
-    isGlobalListening = false;
-    
-    // Stop listening on all tabs
-    const stopPromises = [];
-    for (const tabId of allListeningTabs) {
-      stopPromises.push(
-        chrome.tabs.sendMessage(tabId, { action: 'stopListening' })
-          .catch(error => {
-            console.log('Could not stop listening on tab:', tabId);
-          })
-      );
-    }
-    
-    await Promise.allSettled(stopPromises);
-    
-    allListeningTabs.clear();
-    primaryListeningTabId = null;
-    console.log('Global listening stopped');
-    return Promise.resolve();
-  } catch (error) {
-    console.error('Error stopping global listening:', error);
-    return Promise.reject(error);
+  isGlobalListening = false;
+  for (const tabId of allListeningTabs) {
+    try {
+      await chrome.tabs.sendMessage(tabId, { action: 'stopListening' });
+    } catch {}
   }
+  allListeningTabs.clear();
+  primaryListeningTabId = null;
+  console.log('Global listening stopped');
 }
 
 async function executeVoiceCommand(command, currentTabId) {
-  const startTime = performance.now();
-  console.log(`Executing command: "${command}" from tab ${currentTabId}`);
-  
-  if (!command || typeof command !== 'string') {
-    throw new Error('Invalid command');
-  }
-  
-  const lowerCommand = command.toLowerCase().trim();
-  
-  // Stop listening command
-  if (lowerCommand.includes('stop listening')) {
-    await stopGlobalListening();
-    console.log(`Stop listening executed in ${performance.now() - startTime}ms`);
-    return;
-  }
-  
-  // New tab command
-  if (lowerCommand.includes('new tab')) {
-    const tab = await chrome.tabs.create({});
-    console.log(`New tab executed in ${performance.now() - startTime}ms`);
-    return;
-  }
-  
-  // Close tab command - operates on currently active tab
-  if (lowerCommand.includes('close tab')) {
-    const activeTabs = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (activeTabs.length > 0) {
-      const activeTabId = activeTabs[0].id;
-      await chrome.tabs.remove(activeTabId);
-      allListeningTabs.delete(activeTabId);
-      console.log(`Close tab executed in ${performance.now() - startTime}ms`);
-    }
-    return;
-  }
-  
-  // Next tab command
-  if (lowerCommand.includes('next tab')) {
+  const lowerCommand = (command || '').toLowerCase().trim();
+  if (!lowerCommand) throw new Error('Invalid command');
+
+  const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+
+  if (lowerCommand.includes('stop listening')) return stopGlobalListening();
+  if (lowerCommand.includes('new tab')) return chrome.tabs.create({});
+  if (lowerCommand.includes('close tab') && activeTab) return chrome.tabs.remove(activeTab.id);
+
+  if (lowerCommand.includes('next tab') || lowerCommand.includes('previous tab') || lowerCommand.includes('prev tab')) {
     const tabs = await chrome.tabs.query({ currentWindow: true });
-    const activeTabs = await chrome.tabs.query({ active: true, currentWindow: true });
-    
-    if (activeTabs.length > 0) {
-      const currentIndex = tabs.findIndex(tab => tab.id === activeTabs[0].id);
-      const nextIndex = (currentIndex + 1) % tabs.length;
-      await chrome.tabs.update(tabs[nextIndex].id, { active: true });
-      console.log(`Next tab executed in ${performance.now() - startTime}ms`);
-    }
-    return;
+    if (!activeTab) return;
+    const currentIndex = tabs.findIndex(tab => tab.id === activeTab.id);
+    const newIndex = lowerCommand.includes('next') ? (currentIndex + 1) % tabs.length : (currentIndex - 1 + tabs.length) % tabs.length;
+    return chrome.tabs.update(tabs[newIndex].id, { active: true });
   }
-  
-  // Previous tab command
-  if (lowerCommand.includes('previous tab') || lowerCommand.includes('prev tab')) {
-    const tabs = await chrome.tabs.query({ currentWindow: true });
-    const activeTabs = await chrome.tabs.query({ active: true, currentWindow: true });
-    
-    if (activeTabs.length > 0) {
-      const currentIndex = tabs.findIndex(tab => tab.id === activeTabs[0].id);
-      const prevIndex = currentIndex === 0 ? tabs.length - 1 : currentIndex - 1;
-      await chrome.tabs.update(tabs[prevIndex].id, { active: true });
-      console.log(`Previous tab executed in ${performance.now() - startTime}ms`);
-    }
-    return;
-  }
-  
-  // New window command
-  if (lowerCommand.includes('new window')) {
-    const window = await chrome.windows.create({});
-    console.log(`New window executed in ${performance.now() - startTime}ms`);
-    return;
-  }
-  
-  // Close window command
+
+  if (lowerCommand.includes('new window')) return chrome.windows.create({});
   if (lowerCommand.includes('close window')) {
     const currentWindow = await chrome.windows.getCurrent();
     const allWindows = await chrome.windows.getAll();
-    
-    if (allWindows.length === 1) {
-      await chrome.windows.create({});
-    }
-    
-    await chrome.windows.remove(currentWindow.id);
-    console.log(`Close window executed in ${performance.now() - startTime}ms`);
-    return;
+    if (allWindows.length === 1) await chrome.windows.create({});
+    return chrome.windows.remove(currentWindow.id);
   }
-  
-  // Reload/Refresh command - operates on currently active tab
+
   if (lowerCommand.includes('reload') || lowerCommand.includes('refresh')) {
-    const activeTabs = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (activeTabs.length > 0) {
-      await chrome.tabs.reload(activeTabs[0].id);
-      console.log(`Reload executed in ${performance.now() - startTime}ms`);
-    }
-    return;
+    if (activeTab) return chrome.tabs.reload(activeTab.id);
   }
-  
-  // Duplicate tab command - operates on currently active tab
+
   if (lowerCommand.includes('duplicate tab')) {
-    const activeTabs = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (activeTabs.length > 0) {
-      const tab = await chrome.tabs.duplicate(activeTabs[0].id);
-      console.log(`Duplicate tab executed in ${performance.now() - startTime}ms`);
-    }
-    return;
+    if (activeTab) return chrome.tabs.duplicate(activeTab.id);
   }
-  
-  // Pin tab command - operates on currently active tab
+
   if (lowerCommand.includes('pin tab')) {
-    const activeTabs = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (activeTabs.length > 0) {
-      const tab = await chrome.tabs.get(activeTabs[0].id);
-      const newPinnedState = !tab.pinned;
-      await chrome.tabs.update(activeTabs[0].id, { pinned: newPinnedState });
-      console.log(`${newPinnedState ? 'Pin' : 'Unpin'} tab executed in ${performance.now() - startTime}ms`);
+    if (activeTab) {
+      const tab = await chrome.tabs.get(activeTab.id);
+      return chrome.tabs.update(tab.id, { pinned: !tab.pinned });
     }
-    return;
   }
-  
-  // Mute tab command - operates on currently active tab
+
   if (lowerCommand.includes('mute tab')) {
-    const activeTabs = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (activeTabs.length > 0) {
-      const tab = await chrome.tabs.get(activeTabs[0].id);
-      const newMutedState = !tab.mutedInfo?.muted;
-      await chrome.tabs.update(activeTabs[0].id, { muted: newMutedState });
-      console.log(`${newMutedState ? 'Mute' : 'Unmute'} tab executed in ${performance.now() - startTime}ms`);
+    if (activeTab) {
+      const tab = await chrome.tabs.get(activeTab.id);
+      return chrome.tabs.update(tab.id, { muted: !tab.mutedInfo?.muted });
     }
-    return;
   }
-  
+
   throw new Error(`Unknown command: ${command}`);
 }
 
-// Handle new tabs being created
 chrome.tabs.onCreated.addListener((tab) => {
   if (isGlobalListening && !isRestrictedPage(tab.url)) {
     setTimeout(async () => {
+      if (tab.id !== primaryListeningTabId) return;
       const success = await startListeningOnTab(tab.id);
-      if (success) {
-        allListeningTabs.add(tab.id);
-      }
-    }, 1500); // Give more time for content script to load
+      if (success) allListeningTabs.add(tab.id);
+    }, 1500);
   }
 });
 
-// Handle tabs being removed
 chrome.tabs.onRemoved.addListener((tabId) => {
   allListeningTabs.delete(tabId);
-  if (primaryListeningTabId === tabId) {
-    primaryListeningTabId = null;
-  }
+  if (primaryListeningTabId === tabId) primaryListeningTabId = null;
 });
 
-// Handle tab updates (like navigation)
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   if (isGlobalListening && changeInfo.status === 'complete' && !isRestrictedPage(tab.url)) {
     setTimeout(async () => {
-      if (!allListeningTabs.has(tabId)) {
+      if (tabId === primaryListeningTabId && !allListeningTabs.has(tabId)) {
         const success = await startListeningOnTab(tabId);
-        if (success) {
-          allListeningTabs.add(tabId);
-        }
+        if (success) allListeningTabs.add(tabId);
       }
     }, 500);
   }
 });
 
-// Helper function to check if a page is restricted
 function isRestrictedPage(url) {
-  if (!url) return true;
-  
   const restrictedPrefixes = [
-    'chrome://',
-    'chrome-extension://',
-    'edge://',
-    'about:',
-    'moz-extension://',
-    'safari-extension://'
+    'chrome://', 'chrome-extension://', 'edge://', 'about:', 'moz-extension://', 'safari-extension://'
   ];
-  
-  return restrictedPrefixes.some(prefix => url.startsWith(prefix));
+  return !url || restrictedPrefixes.some(prefix => url.startsWith(prefix));
 }
