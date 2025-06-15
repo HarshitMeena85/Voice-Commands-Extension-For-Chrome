@@ -37,6 +37,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       .catch(error => sendResponse({ success: false, error: error.message }));
     return true;
   }
+  if (request.action === 'isGlobalListening') {
+  sendResponse({ listening: isGlobalListening });
+  return true;
+  }
+
 
   return false;
 });

@@ -87,16 +87,24 @@ async function executeCommand(command) {
       action: 'executeCommand',
       command
     });
-    if (response && response.success && isGlobalMode) {
-      showFeedback(`✓ ${command}`);
+
+    if (response && response.success) {
+      if (isGlobalMode) {
+        showFeedback(`✓ ${command}`);
+      }
     } else {
-      showError(`Failed: ${command}`);
+      if (isGlobalMode) {
+        showError(`❌ Unrecognized: ${command}`);
+      }
     }
   } catch (error) {
     console.error('Error executing command:', error);
-    showError(`Error: ${error.message}`);
+    if (isGlobalMode) {
+      showError(`❌ ${error.message}`);
+    }
   }
 }
+
 
 function showListeningIndicator() {
   if (listeningIndicator || !isGlobalMode) return;
@@ -117,8 +125,43 @@ function showFeedback(message) {
 }
 
 function showError(message) {
-  console.error(message);
+  const error = document.createElement('div');
+  error.style.cssText = `
+    position: fixed;
+    top: 70px;
+    right: 20px;
+    background: linear-gradient(45deg, #f44336, #d32f2f);
+    color: white;
+    padding: 8px 12px;
+    border-radius: 20px;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-size: 13px;
+    font-weight: 500;
+    box-shadow: 0 3px 10px rgba(0,0,0,0.2);
+    z-index: 10001;
+    animation: shake 0.5s ease-in-out;
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255,255,255,0.2);
+  `;
+  error.textContent = message;
+
+  const style = document.createElement('style');
+  style.textContent = `
+    @keyframes shake {
+      0%, 100% { transform: translateX(0); }
+      25% { transform: translateX(-5px); }
+      75% { transform: translateX(5px); }
+    }
+  `;
+  document.head.appendChild(style);
+  document.body.appendChild(error);
+
+  setTimeout(() => {
+    if (error.parentNode) error.parentNode.removeChild(error);
+    if (style.parentNode) style.parentNode.removeChild(style);
+  }, 4000);
 }
+
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === 'ping') {
