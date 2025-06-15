@@ -41,14 +41,20 @@
 ---
 
 ## Project Structure
-voice-tab-controller/
-├── background.js # Handles command execution and tab control
-├── content.js # Handles voice recognition in the tab
-├── manifest.json # Chrome extension metadata
-├── popup.html # Extension popup UI
-├── popup.js # Handles UI interaction and state
-├── popup.css # Styling for popup
-└── icons/ # Extension icons
+
+- `background.js`: Handles command execution and tab control
+
+- `content.js`: Handles voice recognition in the tab
+
+- `manifest.json`: Chrome extension metadata
+
+- `popup.html`: Extension popup UI
+
+- `popup.js`: Handles UI interaction and state
+
+- `popup.css`: Styling for popup
+
+- `icons/`: Extension icons
 
 ---
 
