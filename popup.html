@@ -7,16 +7,16 @@
 <body>
   <div class="container">
     <h1>Voice Tab Controller</h1>
-    
+
     <div class="status" id="status">
       <span id="statusText">Ready</span>
     </div>
-    
+
     <div class="controls">
       <button id="startBtn" class="btn btn-start">Start Global Listening</button>
       <button id="stopBtn" class="btn btn-stop" disabled>Stop Listening</button>
     </div>
-    
+
     <div class="commands">
       <h3>Available Commands:</h3>
       <ul>
@@ -33,8 +33,16 @@
         <li>"Mute tab" - Mutes/unmutes current tab</li>
       </ul>
     </div>
+
+    <div class="custom-commands">
+      <h3>Custom Commands:</h3>
+      <input type="text" id="customPhrase" placeholder="e.g. open youtube" style="width: 100%; margin-bottom: 5px;">
+      <input type="text" id="customUrl" placeholder="https://youtube.com" style="width: 100%; margin-bottom: 10px;">
+      <button id="addCustomBtn" class="btn">Add Command</button>
+      <ul id="customList" style="font-size: 13px; color: #333; margin-top: 10px;"></ul>
+    </div>
   </div>
-  
+
   <script src="popup.js"></script>
 </body>
 </html>

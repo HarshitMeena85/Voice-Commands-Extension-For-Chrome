@@ -1,10 +1,22 @@
 let isGlobalListening = false;
 let primaryListeningTabId = null;
 let allListeningTabs = new Set();
+let customCommands = {};
 
 chrome.runtime.onInstalled.addListener(() => {
   console.log('Voice Tab Controller installed');
+  loadCustomCommands();
 });
+
+chrome.runtime.onStartup.addListener(() => {
+  loadCustomCommands();
+});
+
+function loadCustomCommands() {
+  chrome.storage.sync.get('customCommands', (data) => {
+    customCommands = data.customCommands || {};
+  });
+}
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === 'startGlobalListening') {
@@ -26,8 +38,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
-  if (request.action === 'whoAmI') {
-    sendResponse({ tabId: sender.tab?.id });
+  if (request.action === 'isGlobalListening') {
+    sendResponse({ listening: isGlobalListening });
+    return true;
+  }
+
+  if (request.action === 'saveCustomCommands') {
+    customCommands = request.commands || {};
+    chrome.storage.sync.set({ customCommands });
+    sendResponse({ success: true });
     return true;
   }
 
@@ -37,11 +56,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       .catch(error => sendResponse({ success: false, error: error.message }));
     return true;
   }
-  if (request.action === 'isGlobalListening') {
-  sendResponse({ listening: isGlobalListening });
-  return true;
-  }
-
 
   return false;
 });
@@ -52,7 +66,7 @@ async function waitForContentScript(tabId, maxRetries = 5) {
       const response = await chrome.tabs.sendMessage(tabId, { action: 'ping' });
       if (response && response.success) return true;
     } catch {}
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    await new Promise(r => setTimeout(r, 1000));
   }
   return false;
 }
@@ -61,16 +75,12 @@ async function startListeningOnTab(tabId) {
   const isReady = await waitForContentScript(tabId);
   if (isReady) {
     try {
-      const response = await chrome.tabs.sendMessage(tabId, {
-        action: 'startListening',
-        tabId: tabId   // 👉 pass tabId directly
-      });
-      return response && response.success;
+      const response = await chrome.tabs.sendMessage(tabId, { action: 'startListening', tabId });
+      if (response && response.success) return true;
     } catch {}
   }
   return false;
 }
-
 
 async function startGlobalListening(initiatingTabId) {
   isGlobalListening = true;
@@ -84,79 +94,67 @@ async function startGlobalListening(initiatingTabId) {
       if (tab.id === initiatingTabId) await startListeningOnTab(tab.id);
     }
   }
-  console.log('Global listening started on tab:', initiatingTabId);
 }
 
 async function stopGlobalListening() {
   isGlobalListening = false;
-  for (const tabId of allListeningTabs) {
-    try {
-      await chrome.tabs.sendMessage(tabId, { action: 'stopListening' });
-    } catch {}
-  }
+
+  const stopPromises = Array.from(allListeningTabs).map(tabId =>
+    chrome.tabs.sendMessage(tabId, { action: 'stopListening' }).catch(() => {})
+  );
+
+  await Promise.allSettled(stopPromises);
   allListeningTabs.clear();
   primaryListeningTabId = null;
-  console.log('Global listening stopped');
 }
 
-async function executeVoiceCommand(command, currentTabId) {
-  const lowerCommand = (command || '').toLowerCase().trim();
-  if (!lowerCommand) throw new Error('Invalid command');
+async function executeVoiceCommand(command, tabId) {
+  const cmd = command.toLowerCase().trim();
+  const actTabs = await chrome.tabs.query({ active: true, currentWindow: true });
 
-  const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  // ✅ Custom command match
+  if (customCommands[cmd]) {
+    return chrome.tabs.create({ url: customCommands[cmd] });
+  }
 
-  if (lowerCommand.includes('stop listening')) return stopGlobalListening();
-  if (lowerCommand.includes('new tab')) return chrome.tabs.create({});
-  if (lowerCommand.includes('close tab') && activeTab) return chrome.tabs.remove(activeTab.id);
-
-  if (lowerCommand.includes('next tab') || lowerCommand.includes('previous tab') || lowerCommand.includes('prev tab')) {
+  if (cmd.includes('stop listening')) return stopGlobalListening();
+  if (cmd.includes('new tab')) return chrome.tabs.create({});
+  if (cmd.includes('close tab') && actTabs.length > 0) return chrome.tabs.remove(actTabs[0].id);
+  if (cmd.includes('next tab') && actTabs.length > 0) {
     const tabs = await chrome.tabs.query({ currentWindow: true });
-    if (!activeTab) return;
-    const currentIndex = tabs.findIndex(tab => tab.id === activeTab.id);
-    const newIndex = lowerCommand.includes('next') ? (currentIndex + 1) % tabs.length : (currentIndex - 1 + tabs.length) % tabs.length;
-    return chrome.tabs.update(tabs[newIndex].id, { active: true });
+    const idx = tabs.findIndex(t => t.id === actTabs[0].id);
+    return chrome.tabs.update(tabs[(idx + 1) % tabs.length].id, { active: true });
+  }
+  if ((cmd.includes('previous tab') || cmd.includes('prev tab')) && actTabs.length > 0) {
+    const tabs = await chrome.tabs.query({ currentWindow: true });
+    const idx = tabs.findIndex(t => t.id === actTabs[0].id);
+    const prev = idx === 0 ? tabs.length - 1 : idx - 1;
+    return chrome.tabs.update(tabs[prev].id, { active: true });
+  }
+  if (cmd.includes('new window')) return chrome.windows.create({});
+  if (cmd.includes('close window')) {
+    const win = await chrome.windows.getCurrent();
+    return chrome.windows.remove(win.id);
+  }
+  if (cmd.includes('reload') || cmd.includes('refresh'))
+    return chrome.tabs.reload(actTabs[0].id);
+  if (cmd.includes('duplicate tab'))
+    return chrome.tabs.duplicate(actTabs[0].id);
+  if (cmd.includes('pin tab')) {
+    const tab = await chrome.tabs.get(actTabs[0].id);
+    return chrome.tabs.update(tab.id, { pinned: !tab.pinned });
+  }
+  if (cmd.includes('mute tab')) {
+    const tab = await chrome.tabs.get(actTabs[0].id);
+    return chrome.tabs.update(tab.id, { muted: !tab.mutedInfo?.muted });
   }
 
-  if (lowerCommand.includes('new window')) return chrome.windows.create({});
-  if (lowerCommand.includes('close window')) {
-    const currentWindow = await chrome.windows.getCurrent();
-    const allWindows = await chrome.windows.getAll();
-    if (allWindows.length === 1) await chrome.windows.create({});
-    return chrome.windows.remove(currentWindow.id);
-  }
-
-  if (lowerCommand.includes('reload') || lowerCommand.includes('refresh')) {
-    if (activeTab) return chrome.tabs.reload(activeTab.id);
-  }
-
-  if (lowerCommand.includes('duplicate tab')) {
-    if (activeTab) return chrome.tabs.duplicate(activeTab.id);
-  }
-
-  if (lowerCommand.includes('pin tab')) {
-    if (activeTab) {
-      const tab = await chrome.tabs.get(activeTab.id);
-      return chrome.tabs.update(tab.id, { pinned: !tab.pinned });
-    }
-  }
-
-  if (lowerCommand.includes('mute tab')) {
-    if (activeTab) {
-      const tab = await chrome.tabs.get(activeTab.id);
-      return chrome.tabs.update(tab.id, { muted: !tab.mutedInfo?.muted });
-    }
-  }
-
-  throw new Error(`Unknown command: ${command}`);
+  throw new Error('Unknown command: ' + command);
 }
 
 chrome.tabs.onCreated.addListener((tab) => {
-  if (isGlobalListening && !isRestrictedPage(tab.url)) {
-    setTimeout(async () => {
-      if (tab.id !== primaryListeningTabId) return;
-      const success = await startListeningOnTab(tab.id);
-      if (success) allListeningTabs.add(tab.id);
-    }, 1500);
+  if (isGlobalListening && tab.id === primaryListeningTabId && !isRestrictedPage(tab.url)) {
+    setTimeout(() => startListeningOnTab(tab.id), 1500);
   }
 });
 
@@ -167,18 +165,14 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   if (isGlobalListening && changeInfo.status === 'complete' && !isRestrictedPage(tab.url)) {
-    setTimeout(async () => {
-      if (tabId === primaryListeningTabId && !allListeningTabs.has(tabId)) {
-        const success = await startListeningOnTab(tabId);
-        if (success) allListeningTabs.add(tabId);
-      }
-    }, 500);
+    if (tabId === primaryListeningTabId) {
+      setTimeout(() => startListeningOnTab(tabId), 500);
+    }
   }
 });
 
 function isRestrictedPage(url) {
-  const restrictedPrefixes = [
+  return [
     'chrome://', 'chrome-extension://', 'edge://', 'about:', 'moz-extension://', 'safari-extension://'
-  ];
-  return !url || restrictedPrefixes.some(prefix => url.startsWith(prefix));
+  ].some(prefix => url?.startsWith(prefix));
 }

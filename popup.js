@@ -4,6 +4,12 @@ document.addEventListener('DOMContentLoaded', () => {
   const status = document.getElementById('status');
   const statusText = document.getElementById('statusText');
 
+  const customPhrase = document.getElementById('customPhrase');
+  const customUrl = document.getElementById('customUrl');
+  const addCustomBtn = document.getElementById('addCustomBtn');
+  const customList = document.getElementById('customList');
+  let commands = {};
+
   let currentTab = null;
 
   init();
@@ -20,16 +26,18 @@ document.addEventListener('DOMContentLoaded', () => {
         return;
       }
 
-      // ✅ Check global listening state from background
+      // Load current global listening state
       chrome.runtime.sendMessage({ action: 'isGlobalListening' }, (res) => {
         if (res && res.listening) {
-          updateUI(true);  // Show stop button
+          updateUI(true);
         } else {
-          updateUI(false); // Show start button
+          updateUI(false);
         }
       });
 
       await checkContentScriptStatus();
+      loadCustomCommands();
+
     } catch (error) {
       console.error('Initialization error:', error);
       statusText.textContent = 'Error initializing extension';
@@ -40,12 +48,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function isRestrictedPage(url) {
     const restrictedPrefixes = [
-      'chrome://',
-      'chrome-extension://',
-      'edge://',
-      'about:',
-      'moz-extension://',
-      'safari-extension://'
+      'chrome://', 'chrome-extension://', 'edge://', 'about:',
+      'moz-extension://', 'safari-extension://'
     ];
     return restrictedPrefixes.some(prefix => url.startsWith(prefix));
   }
@@ -75,9 +79,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const response = await sendMessageToTab({ action: 'ping' });
 
         if (response && response.success) {
-          if (response.speechSupported) {
-            // No UI update here — handled above via background check
-          } else {
+          if (!response.speechSupported) {
             statusText.textContent = 'Speech recognition not supported';
             startBtn.disabled = true;
             stopBtn.disabled = true;
@@ -175,9 +177,34 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  window.addEventListener('beforeunload', async () => {
-    try {
-      await chrome.runtime.sendMessage({ action: 'stopGlobalListening' });
-    } catch {}
+  function loadCustomCommands() {
+    chrome.storage.sync.get('customCommands', (data) => {
+      commands = data.customCommands || {};
+      renderCustomList();
+    });
+  }
+
+  function renderCustomList() {
+    customList.innerHTML = '';
+    for (const key in commands) {
+      const li = document.createElement('li');
+      li.textContent = `"${key}" → ${commands[key]}`;
+      customList.appendChild(li);
+    }
+  }
+
+  addCustomBtn.addEventListener('click', () => {
+    const phrase = customPhrase.value.trim().toLowerCase();
+    const url = customUrl.value.trim();
+    if (!phrase || !url) return;
+
+    commands[phrase] = url;
+    chrome.runtime.sendMessage({ action: 'saveCustomCommands', commands }, (res) => {
+      if (res.success) {
+        renderCustomList();
+        customPhrase.value = '';
+        customUrl.value = '';
+      }
+    });
   });
 });
