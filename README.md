@@ -1,6 +1,6 @@
-# Voice Tab Controller
+# Voice Commands Extension for Chrome
 
-**Voice Tab Controller** is a Chrome extension that lets you control your browser with your voice — including customizable commands to open any website.
+**Voice Commands Extension for Chrome** is a Chrome extension that lets you control your browser with your voice — including customizable commands to open any website.
 
 ---
 
